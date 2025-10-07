@@ -48,3 +48,5 @@ xrp-insights-dashboard/
 - Price/liquidity overlays
 - Hourly snapshots for history
 - Export CSV
+
+**Live app:** https://<your-app-subdomain>.streamlit.app
