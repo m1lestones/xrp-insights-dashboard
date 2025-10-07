@@ -1,8 +1,12 @@
+import time
 import streamlit as st
 import pandas as pd
 
 from src.config import REFRESH_SECONDS, TX_TABLE_ROWS
-from src.data_ingestion import fetch_recent_transactions
+from src.data_ingestion import (
+    fetch_recent_transactions,
+    get_account_info, get_account_tx,  # <-- new helpers you added
+)
 from src.processing import compute_txn_per_minute, compute_avg_fee
 from src.charts import line_tps, line_avg_fee
 
@@ -11,44 +15,117 @@ st.set_page_config(page_title="XRP Global Payment Insights", layout="wide")
 st.title("🌐 XRP Global Payment Insights Dashboard")
 st.caption("Read-only analytics. Data: XRPL JSON-RPC (https://s1.ripple.com:51234).")
 
+# Sidebar controls
 with st.sidebar:
     st.header("⚙️ Controls")
-    st.write(f"⏳ Auto-refresh every {REFRESH_SECONDS}s (click the 🔄 button to refresh now)")
+    auto = st.toggle("Auto-refresh", value=False, key="auto_refresh")
+    st.caption(f"⏳ Every {REFRESH_SECONDS}s")
     if st.button("🔄 Refresh now"):
         st.rerun()
 
-# Fetch a recent sample from XRPL
-df = fetch_recent_transactions(ledgers_back=20)
+# Tabs
+tab_overview, tab_explorer = st.tabs(["Overview", "Explorer"])
 
-# Graceful empty state
-if df is None or df.empty:
-    st.warning("No transactions fetched yet. Try the refresh button and wait a few seconds.")
-    st.stop()
+# ---------------------------- Overview ----------------------------
+with tab_overview:
+    # Fetch a recent sample from XRPL
+    df = fetch_recent_transactions(ledgers_back=20)
 
-# KPI cards
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Recent txns (sample)", f"{len(df):,}")
-with col2:
-    st.metric("Unique accounts (sample)", f"{df['account'].nunique():,}")
-with col3:
-    fees = pd.to_numeric(df["fee_drops"], errors="coerce").dropna() / 1_000_000
-    st.metric("Avg fee (sample)", f"{fees.mean():.6f} XRP" if not fees.empty else "n/a")
+    # Graceful empty state
+    if df is None or df.empty:
+        st.warning("No transactions fetched yet. Try the refresh button and wait a few seconds.")
+        st.stop()
 
-# Charts
-tps = compute_txn_per_minute(df)
-avg_fee = compute_avg_fee(df)
+    # KPI cards
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Recent txns (sample)", f"{len(df):,}",
+                  help="Count of successful transactions in sampled validated ledgers.")
+    with col2:
+        st.metric("Unique accounts (sample)", f"{df['account'].nunique():,}",
+                  help="Distinct sending accounts in the sample.")
+    with col3:
+        fees = pd.to_numeric(df["fee_drops"], errors="coerce").dropna() / 1_000_000
+        st.metric("Avg fee (sample)", f"{fees.mean():.6f} XRP" if not fees.empty else "n/a",
+                  help="Average transaction fee across the sample.")
 
-left, right = st.columns(2)
-with left:
-    st.plotly_chart(line_tps(tps), use_container_width=True)
-with right:
-    st.plotly_chart(line_avg_fee(avg_fee), use_container_width=True)
+    # Charts
+    tps = compute_txn_per_minute(df)
+    avg_fee = compute_avg_fee(df)
 
-st.subheader("🧾 Most Recent Transactions (sample)")
-show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
-st.dataframe(show, use_container_width=True)
+    left, right = st.columns(2)
+    with left:
+        st.plotly_chart(line_tps(tps), use_container_width=True)
+    with right:
+        st.plotly_chart(line_avg_fee(avg_fee), use_container_width=True)
 
+    st.subheader("🧾 Most Recent Transactions (sample)")
+    show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
+    st.dataframe(show, use_container_width=True)
 
-# Auto refresh
-st.autorefresh(interval=REFRESH_SECONDS * 1000, key="auto_refresh_key")
+# ---------------------------- Explorer ----------------------------
+with tab_explorer:
+    st.subheader("🔎 Address Explorer")
+    st.caption("Enter an XRP (classic) address starting with 'r' to view balance & recent transactions.")
+    addr = st.text_input("XRP address", placeholder="r...")
+    limit = st.number_input("Recent txns to load", min_value=5, max_value=200, value=20, step=5)
+
+    if st.button("Lookup"):
+        if not addr or not addr.startswith("r"):
+            st.error("Please enter a valid classic address that starts with 'r'.")
+        else:
+            with st.spinner("Fetching account info & transactions..."):
+                try:
+                    info = get_account_info(addr)
+                    if "account_data" in info:
+                        ad = info["account_data"]
+                        xrp_balance = float(ad.get("Balance", 0)) / 1_000_000
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("XRP Balance", f"{xrp_balance:,.6f} XRP")
+                        c2.metric("Sequence", ad.get("Sequence", "—"))
+                        c3.metric("OwnerCount", ad.get("OwnerCount", "—"))
+                        with st.expander("Raw account_data"):
+                            st.json(ad)
+                    else:
+                        st.warning(info.get("error_message") or "No account data returned.")
+
+                    txs = get_account_tx(addr, limit=int(limit))
+                    if txs:
+                        rows = []
+                        for t in txs:
+                            tx = t.get("tx", {}) or {}
+                            meta = t.get("meta", {}) or {}
+                            res = meta.get("TransactionResult")
+                            amt = tx.get("Amount")
+                            # normalize amount to XRP if numeric; otherwise leave as-is
+                            if isinstance(amt, dict):
+                                amount_disp = amt.get("value")
+                            else:
+                                try:
+                                    amount_disp = float(amt) / 1_000_000 if amt is not None else None
+                                except Exception:
+                                    amount_disp = amt
+                            try:
+                                fee_xrp = float(tx.get("Fee")) / 1_000_000 if tx.get("Fee") is not None else None
+                            except Exception:
+                                fee_xrp = tx.get("Fee")
+                            rows.append({
+                                "hash": tx.get("hash"),
+                                "type": tx.get("TransactionType"),
+                                "result": res,
+                                "amount_xrp_or_value": amount_disp,
+                                "fee_xrp": fee_xrp,
+                                "account": tx.get("Account"),
+                            })
+                        st.write("Recent Transactions")
+                        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                    else:
+                        st.info("No recent transactions found.")
+                except Exception as e:
+                    st.error("Lookup failed.")
+                    st.caption(str(e))
+
+# ---------------------------- Safe auto-refresh ----------------------------
+if auto:
+    time.sleep(REFRESH_SECONDS)
+    st.rerun()
