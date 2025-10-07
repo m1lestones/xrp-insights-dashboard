@@ -15,7 +15,6 @@ with st.sidebar:
     st.header("⚙️ Controls")
     st.write(f"⏳ Auto-refresh every {REFRESH_SECONDS}s (click the 🔄 button to refresh now)")
     if st.button("🔄 Refresh now"):
-        # Streamlit >= 1.27 uses st.rerun()
         st.rerun()
 
 # Fetch a recent sample from XRPL
@@ -49,6 +48,7 @@ with right:
 st.subheader("🧾 Most Recent Transactions (sample)")
 show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
 st.dataframe(show, use_container_width=True)
+
 
 # Auto refresh
 st.autorefresh(interval=REFRESH_SECONDS * 1000, key="auto_refresh_key")
