@@ -54,3 +54,26 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
     if not df.empty:
         df["date_utc"] = pd.to_datetime(df["date_utc"], utc=True, errors="coerce")
     return df
+# ---- Address Explorer helpers (append to bottom) ----
+def get_account_info(address: str) -> dict:
+    """
+    Returns account_info.result (contains 'account_data' on success).
+    Requires the helper _rpc(method, params) defined above.
+    """
+    return _rpc("account_info", {
+        "account": address,
+        "ledger_index": "validated",
+        "strict": True
+    })
+
+def get_account_tx(address: str, limit: int = 20) -> list[dict]:
+    """
+    Returns a list from account_tx.result.transactions (may be empty).
+    """
+    res = _rpc("account_tx", {
+        "account": address,
+        "limit": int(limit),
+        "ledger_index_min": -1,
+        "ledger_index_max": -1
+    })
+    return res.get("transactions", []) or []
