@@ -1,16 +1,23 @@
 import time
 import streamlit as st
 import pandas as pd
+from pathlib import Path
 
 from src.config import REFRESH_SECONDS, TX_TABLE_ROWS
 from src.data_ingestion import (
     fetch_recent_transactions,
-    get_account_info, get_account_tx,  # <-- new helpers you added
+    get_account_info, get_account_tx,
 )
 from src.processing import compute_txn_per_minute, compute_avg_fee
 from src.charts import line_tps, line_avg_fee
 
+# set_page_config MUST be first Streamlit call
 st.set_page_config(page_title="XRP Global Payment Insights", layout="wide")
+
+# Optional logo (only shows if file exists)
+logo_path = Path("assets/logo.png")
+if logo_path.exists():
+    st.image(str(logo_path), width=36)
 
 st.title("🌐 XRP Global Payment Insights Dashboard")
 st.caption("Read-only analytics. Data: XRPL JSON-RPC (https://s1.ripple.com:51234).")
@@ -28,15 +35,11 @@ tab_overview, tab_explorer = st.tabs(["Overview", "Explorer"])
 
 # ---------------------------- Overview ----------------------------
 with tab_overview:
-    # Fetch a recent sample from XRPL
     df = fetch_recent_transactions(ledgers_back=20)
-
-    # Graceful empty state
     if df is None or df.empty:
         st.warning("No transactions fetched yet. Try the refresh button and wait a few seconds.")
         st.stop()
 
-    # KPI cards
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Recent txns (sample)", f"{len(df):,}",
@@ -49,7 +52,6 @@ with tab_overview:
         st.metric("Avg fee (sample)", f"{fees.mean():.6f} XRP" if not fees.empty else "n/a",
                   help="Average transaction fee across the sample.")
 
-    # Charts
     tps = compute_txn_per_minute(df)
     avg_fee = compute_avg_fee(df)
 
@@ -97,7 +99,6 @@ with tab_explorer:
                             meta = t.get("meta", {}) or {}
                             res = meta.get("TransactionResult")
                             amt = tx.get("Amount")
-                            # normalize amount to XRP if numeric; otherwise leave as-is
                             if isinstance(amt, dict):
                                 amount_disp = amt.get("value")
                             else:
