@@ -14,15 +14,20 @@ from src.charts import line_tps, line_avg_fee
 # set_page_config MUST be first Streamlit call
 st.set_page_config(page_title="XRP Global Payment Insights", layout="wide")
 
-# Optional logo (only shows if file exists)
+# -------- Header (logo + title) --------
 logo_path = Path("assets/logo.png")
 if logo_path.exists():
-    st.image(str(logo_path), width=36)
+    left, right = st.columns([0.12, 0.88])
+    with left:
+        st.image(str(logo_path), width=88)  # adjust 72–96 to taste
+    with right:
+        st.title("🌐 XRP Global Payment Insights Dashboard")
+        st.caption("Read-only analytics. Data: XRPL JSON-RPC (https://s1.ripple.com:51234).")
+else:
+    st.title("🌐 XRP Global Payment Insights Dashboard")
+    st.caption("Read-only analytics. Data: XRPL JSON-RPC (https://s1.ripple.com:51234).")
 
-st.title("🌐 XRP Global Payment Insights Dashboard")
-st.caption("Read-only analytics. Data: XRPL JSON-RPC (https://s1.ripple.com:51234).")
-
-# Sidebar controls
+# -------- Sidebar controls --------
 with st.sidebar:
     st.header("⚙️ Controls")
     auto = st.toggle("Auto-refresh", value=False, key="auto_refresh")
@@ -30,10 +35,9 @@ with st.sidebar:
     if st.button("🔄 Refresh now"):
         st.rerun()
 
-# Tabs
+# -------- Tabs --------
 tab_overview, tab_explorer = st.tabs(["Overview", "Explorer"])
 
-# ---------------------------- Overview ----------------------------
 # ---------------------------- Overview ----------------------------
 @st.cache_data(ttl=60)
 def cached_recent(n=20):
@@ -98,7 +102,6 @@ with tab_overview:
         show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
         st.dataframe(show, use_container_width=True)
 
-
 # ---------------------------- Explorer ----------------------------
 with tab_explorer:
     st.subheader("🔎 Address Explorer")
@@ -137,6 +140,7 @@ with tab_explorer:
                                 amount_disp = amt.get("value")
                             else:
                                 try:
+                                # normalize to XRP if numeric in drops
                                     amount_disp = float(amt) / 1_000_000 if amt is not None else None
                                 except Exception:
                                     amount_disp = amt
