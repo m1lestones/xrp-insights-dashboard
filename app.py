@@ -102,6 +102,52 @@ with tab_overview:
         show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
         st.dataframe(show, use_container_width=True)
 
+        # ---------- Whale Watch (inside the 'else' so df exists) ----------
+        st.divider()
+        st.subheader("🐳 Whale Watch (large XRP transfers)")
+
+        # Threshold slider (XRP)
+        thr_xrp = st.slider(
+            "Show transfers above (XRP)",
+            min_value=100.0, max_value=5_000_000.0, value=100_000.0, step=100.0,
+            help="Filters for XRP-denominated transfers by XRP amount (issued currencies are ignored)."
+        )
+
+        # Normalize 'amount' (drops → XRP). Issued currencies (dict/string) are ignored.
+        ww = df.copy()
+        amt_num = pd.to_numeric(ww["amount"], errors="coerce")  # drops (if XRP)
+        ww["amount_xrp"] = amt_num / 1_000_000
+
+        whales = (
+            ww.loc[ww["amount_xrp"].notna() & (ww["amount_xrp"] >= thr_xrp)]
+              .sort_values("amount_xrp", ascending=False)
+              .head(50)
+              .copy()
+        )
+
+        if whales.empty:
+            st.info("No XRP transfers above that threshold in the sampled ledgers.")
+        else:
+            # Optional: short hash preview
+            whales["hash_preview"] = whales["hash"].str.slice(0, 10) + "…"
+
+            cols = ["date_utc", "account", "transaction_type", "amount_xrp", "hash_preview"]
+            st.dataframe(
+                whales[cols].rename(columns={
+                    "date_utc": "When (UTC)",
+                    "account": "From",
+                    "transaction_type": "Type",
+                    "amount_xrp": "Amount (XRP)",
+                    "hash_preview": "Tx Hash",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # Quick export for your presentation
+            csv_whales = whales[["hash", "date_utc", "account", "transaction_type", "amount_xrp"]].to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Download whale transfers (CSV)", csv_whales, "whale_transfers.csv", "text/csv")
+
 # ---------------------------- Explorer ----------------------------
 with tab_explorer:
     st.subheader("🔎 Address Explorer")
@@ -140,7 +186,7 @@ with tab_explorer:
                                 amount_disp = amt.get("value")
                             else:
                                 try:
-                                # normalize to XRP if numeric in drops
+                                    # normalize to XRP if numeric in drops
                                     amount_disp = float(amt) / 1_000_000 if amt is not None else None
                                 except Exception:
                                     amount_disp = amt
