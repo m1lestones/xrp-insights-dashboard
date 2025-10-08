@@ -34,36 +34,70 @@ with st.sidebar:
 tab_overview, tab_explorer = st.tabs(["Overview", "Explorer"])
 
 # ---------------------------- Overview ----------------------------
+# ---------------------------- Overview ----------------------------
+@st.cache_data(ttl=60)
+def cached_recent(n=20):
+    return fetch_recent_transactions(ledgers_back=n)
+
 with tab_overview:
-    df = fetch_recent_transactions(ledgers_back=20)
+    colA, colB = st.columns([1, 3])
+    with colA:
+        use_demo = st.checkbox("Use demo data (fallback)", value=False)
+    with colB:
+        st.caption("Tip: enable demo data if the network is slow or rate-limited.")
+
+    df = pd.DataFrame()
+    with st.spinner("Fetching XRPL data…"):
+        try:
+            if not use_demo:
+                df = cached_recent(20)
+        except Exception as e:
+            st.warning(f"XRPL fetch failed: {e}")
+
+    # Demo dataset if needed
+    if (df is None or df.empty) and use_demo:
+        df = pd.DataFrame([
+            {"hash": "DEMO1", "date_utc": pd.Timestamp.utcnow(), "amount": "25000000", "fee_drops": "12", "account": "rDEMO...", "transaction_type": "Payment"},
+            {"hash": "DEMO2", "date_utc": pd.Timestamp.utcnow(), "amount": "9000000",  "fee_drops": "10", "account": "rDEMO...", "transaction_type": "Payment"},
+        ])
+        st.info("Showing demo data (offline mode).")
+
     if df is None or df.empty:
-        st.warning("No transactions fetched yet. Try the refresh button and wait a few seconds.")
-        st.stop()
+        st.error("No transactions available right now. Try **Refresh now** or enable **Demo data**.")
+    else:
+        # KPI cards
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Recent txns (sample)", f"{len(df):,}",
+                      help="Count of successful transactions in sampled validated ledgers.")
+        with col2:
+            st.metric("Unique accounts (sample)", f"{df['account'].nunique():,}",
+                      help="Distinct sending accounts in the sample.")
+        with col3:
+            fees = pd.to_numeric(df["fee_drops"], errors="coerce").dropna() / 1_000_000
+            st.metric("Avg fee (sample)", f"{fees.mean():.6f} XRP" if not fees.empty else "n/a",
+                      help="Average transaction fee across the sample.")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Recent txns (sample)", f"{len(df):,}",
-                  help="Count of successful transactions in sampled validated ledgers.")
-    with col2:
-        st.metric("Unique accounts (sample)", f"{df['account'].nunique():,}",
-                  help="Distinct sending accounts in the sample.")
-    with col3:
-        fees = pd.to_numeric(df["fee_drops"], errors="coerce").dropna() / 1_000_000
-        st.metric("Avg fee (sample)", f"{fees.mean():.6f} XRP" if not fees.empty else "n/a",
-                  help="Average transaction fee across the sample.")
+        # Charts (guarded)
+        tps = compute_txn_per_minute(df)
+        avg_fee = compute_avg_fee(df)
 
-    tps = compute_txn_per_minute(df)
-    avg_fee = compute_avg_fee(df)
+        left, right = st.columns(2)
+        with left:
+            if not tps.empty:
+                st.plotly_chart(line_tps(tps), use_container_width=True)
+            else:
+                st.info("No TPS data to chart yet.")
+        with right:
+            if not avg_fee.empty:
+                st.plotly_chart(line_avg_fee(avg_fee), use_container_width=True)
+            else:
+                st.info("No fee data to chart yet.")
 
-    left, right = st.columns(2)
-    with left:
-        st.plotly_chart(line_tps(tps), use_container_width=True)
-    with right:
-        st.plotly_chart(line_avg_fee(avg_fee), use_container_width=True)
+        st.subheader("🧾 Most Recent Transactions (sample)")
+        show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
+        st.dataframe(show, use_container_width=True)
 
-    st.subheader("🧾 Most Recent Transactions (sample)")
-    show = df[["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"]].head(TX_TABLE_ROWS)
-    st.dataframe(show, use_container_width=True)
 
 # ---------------------------- Explorer ----------------------------
 with tab_explorer:
