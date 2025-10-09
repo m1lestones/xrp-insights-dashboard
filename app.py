@@ -293,7 +293,7 @@ with tab_market:
 
     st.markdown(
         "📄 **Whitepaper:** "
-        "[XRP Ledger Whitepaper](https://xrpl.org/whitepaper.html)"
+        "[XRP Ledger Documentation](https://xrpl.org/)"
     )
 
     st.divider()
