@@ -15,6 +15,18 @@ HEADERS = {
     "User-Agent": "XRP-Insights/0.2",
 }
 
+# CoinGecko API key support (optional, improves rate limits)
+def get_cg_headers():
+    """Get headers with API key if available from Streamlit secrets"""
+    try:
+        import streamlit as st
+        api_key = st.secrets.get("CG_API_KEY")
+        if api_key:
+            return {**HEADERS, "x-cg-demo-api-key": api_key}
+    except Exception:
+        pass
+    return HEADERS
+
 LAST_ENDPOINT = None  # track last successful node
 
 def get_last_endpoint() -> str | None:
@@ -184,7 +196,7 @@ def cg_get_coin_market(coin_id: str = "ripple", vs: str = "usd") -> dict:
     """
     url = f"{CG_BASE}/coins/markets"
     params = {"vs_currency": vs, "ids": coin_id, "price_change_percentage": "24h"}
-    r = requests.get(url, params=params, timeout=20, headers=HEADERS)
+    r = requests.get(url, params=params, timeout=20, headers=get_cg_headers())
     r.raise_for_status()
     data = r.json()
     return data[0] if data else {}
@@ -194,7 +206,7 @@ def cg_get_global() -> dict:
     Returns global market data (total market cap) to compute dominance.
     """
     url = f"{CG_BASE}/global"
-    r = requests.get(url, timeout=20, headers=HEADERS)
+    r = requests.get(url, timeout=20, headers=get_cg_headers())
     r.raise_for_status()
     return r.json().get("data", {}) or {}
 
@@ -222,7 +234,7 @@ def cg_get_top_coins(limit: int = 200, vs: str = "usd") -> list[dict]:
                     "sparkline": "false",
                     "price_change_percentage": "24h",
                 },
-                headers=HEADERS,
+                headers=get_cg_headers(),
                 timeout=15,
             )
             # Handle common transient statuses with exponential backoff
@@ -257,6 +269,6 @@ def cg_simple_price(coin_ids: list[str], vs_currencies: list[str]) -> dict:
     """
     url = f"{CG_BASE}/simple/price"
     params = {"ids": ",".join(coin_ids), "vs_currencies": ",".join(vs_currencies)}
-    r = requests.get(url, params=params, timeout=20, headers=HEADERS)
+    r = requests.get(url, params=params, timeout=20, headers=get_cg_headers())
     r.raise_for_status()
     return r.json() or {}

@@ -432,6 +432,13 @@ with tab_network:
     c5, c6 = st.columns([2, 2])
     with c5:
         st.caption(f"Connected node: **{get_last_endpoint() or '—'}**")
+        # Check CoinGecko API key status
+        try:
+            cg_key = st.secrets.get("CG_API_KEY")
+            cg_status = "✅ API Key Active" if cg_key else "⚠️ Public API (limited)"
+        except Exception:
+            cg_status = "⚠️ Public API (limited)"
+        st.caption(f"CoinGecko: **{cg_status}**")
         st.write("Complete ledgers:")
         st.code(str(complete_ledgers), language="text")
     with c6:
