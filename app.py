@@ -338,58 +338,57 @@ with tab_market:
 
     st.divider()
 
-    # --- Converter ---
-    st.markdown("### 🔁 Converter (Top 200 → Fiat or Crypto)")
+    # ------- Top coins + Converter setup (safe) -------
+    @st.cache_data(ttl=120)
+    def cached_top200():
+        try:
+            # Uses USD as the vs currency in cg_get_top_coins()
+            from src.data_ingestion import cg_get_top_coins
+            return cg_get_top_coins(limit=200, vs="usd") or []
+        except Exception:
+            return []
 
-    if not top200:
-        st.info("Top coins market data is temporarily unavailable (rate-limited). Try again shortly.")
-    else:
-        # Build crypto list for selection
-        id_to_price = {c["id"]: c.get("current_price", 0) for c in top200}
-        id_to_label = {c["id"]: f"{c['name']} ({c['symbol'].upper()})" for c in top200}
+    top = cached_top200()
+
+    # Build a safe {id: "Name (SYMBOL)"} map for selectboxes
+    id_to_label = {
+        c["id"]: f'{c.get("name","?")} ({str(c.get("symbol","?")).upper()})'
+        for c in (top or [])
+        if isinstance(c, dict) and c.get("id")
+    }
 
     crypto_ids_sorted = sorted(id_to_label.keys(), key=lambda i: id_to_label[i].lower())
-    default_base = "ripple" if "ripple" in id_to_label else crypto_ids_sorted[0]
 
-    base_coin = st.selectbox(
-        "Base crypto (amount you have)",
-        [default_base] + [i for i in crypto_ids_sorted if i != "ripple"],
-        format_func=lambda i: id_to_label.get(i, i),
-        index=0
-    )
-    amount = st.number_input("Amount", min_value=0.0, value=100.0, step=1.0)
+    # Fallback/defaults
+    default_crypto = "ripple" if "ripple" in id_to_label else (crypto_ids_sorted[0] if crypto_ids_sorted else None)
 
-    mode = st.radio("Convert to", ["Fiat", "Crypto"], horizontal=True)
-
-    if mode == "Fiat":
-        fiats = ["usd", "eur", "cny", "cop", "gbp", "jpy", "inr", "aud", "cad", "chf"]
-        fiat = st.selectbox("Fiat currency", fiats, index=0)
-
-        @st.cache_data(ttl=60)
-        def price_in_fiats(coin_id: str, vs_list: list[str]):
-            return cg_simple_price([coin_id], vs_list)
-
-        prices = price_in_fiats(base_coin, fiats)  # {coin_id: {fiat: price}}
-        p = ((prices.get(base_coin) or {}).get(fiat)) or 0
-        converted = amount * p
-        st.success(f"{amount:,.4f} {id_to_label.get(base_coin, base_coin)} ≈ {converted:,.2f} {fiat.upper()}")
-
-    else:  # Crypto → Crypto using USD ratio
-        quote_coin = st.selectbox(
-            "Quote crypto",
-            [i for i in crypto_ids_sorted if i != base_coin],
-            format_func=lambda i: id_to_label.get(i, i)
-        )
-        p_base = id_to_price.get(base_coin, 0)
-        p_quote = id_to_price.get(quote_coin, 0)
-        if p_base and p_quote:
-            converted = amount * (p_base / p_quote)
-            st.success(
-                f"{amount:,.4f} {id_to_label.get(base_coin, base_coin)} ≈ "
-                f"{converted:,.4f} {id_to_label.get(quote_coin, quote_coin)}"
+    # Minimal converter UI (USD only for now, since top list is vs=USD)
+    st.subheader("💱 Converter (beta)")
+    if not crypto_ids_sorted:
+        st.info("Top coins market data is temporarily unavailable (rate-limited). Try the refresh button in the sidebar.")
+    else:
+        col_conv1, col_conv2, col_conv3 = st.columns([2, 1, 2])
+        with col_conv1:
+            crypto_sel = st.selectbox(
+                "Crypto",
+                options=crypto_ids_sorted,
+                format_func=lambda i: id_to_label[i],
+                index=crypto_ids_sorted.index(default_crypto) if default_crypto in crypto_ids_sorted else 0,
             )
+        with col_conv2:
+            st.markdown("**Fiat**")
+            st.write("USD")  # converter uses USD prices from the same call
+        with col_conv3:
+            amt = st.number_input("Amount", min_value=0.0, value=1.0, step=0.1)
+
+        # Make a quick {id: current_price_usd} lookup
+        price_map = {c["id"]: c.get("current_price") for c in top if isinstance(c, dict) and c.get("id")}
+        px = price_map.get(crypto_sel)
+
+        if px is None:
+            st.warning("No price available for that asset right now.")
         else:
-            st.warning("Price data unavailable right now. Please try again.")
+            st.metric("Converted value", f"${amt * float(px):,.2f} USD")
 
 # ---------------------------- Network ----------------------------
 with tab_network:
