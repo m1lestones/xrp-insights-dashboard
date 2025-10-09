@@ -6,13 +6,12 @@ from pathlib import Path
 from src.config import REFRESH_SECONDS, TX_TABLE_ROWS
 from src.data_ingestion import (
     fetch_recent_transactions,
-    get_account_info, get_account_tx,
-    get_last_endpoint,
-    get_xrp_quote, get_xrp_market,
-    get_server_health,            # <-- add this
+    get_account_info, get_account_tx, get_last_endpoint,
+    get_xrp_quote, get_xrp_market, get_server_health,
+    cg_get_coin_market, cg_get_global, cg_get_top_coins, cg_simple_price,   # <-- add
 )
 from src.processing import compute_txn_per_minute, compute_avg_fee
-from src.charts import line_tps, line_avg_fee
+from src.charts import line_tps, line_avg_fee, tradingview_widget_html
 
 # set_page_config MUST be first Streamlit call
 st.set_page_config(page_title="XRP Global Payment Insights", layout="wide")
@@ -39,7 +38,7 @@ with st.sidebar:
         st.rerun()
 
 # -------- Tabs --------
-tab_overview, tab_explorer, tab_network = st.tabs(["Overview", "Explorer", "Network"])
+tab_overview, tab_explorer, tab_market, tab_network = st.tabs(["Overview", "Explorer", "Market", "Network"])
 
 # ---------------------------- Overview ----------------------------
 @st.cache_data(ttl=60)
@@ -249,6 +248,143 @@ with tab_explorer:
                 except Exception as e:
                     st.error("Lookup failed.")
                     st.caption(str(e))
+
+# ---------------------------- Market ----------------------------
+with tab_market:
+    st.subheader("📊 Market Overview & Chart")
+
+    # --- Data fetch (cached) ---
+    @st.cache_data(ttl=120)
+    def cached_xrp_and_global():
+        coin = cg_get_coin_market("ripple", "usd")
+        global_mkt = cg_get_global()
+        return coin, global_mkt
+
+    @st.cache_data(ttl=300)
+    def cached_top200():
+        # For converter lists and USD prices
+        return cg_get_top_coins(limit=200, vs="usd")
+
+    coin, global_mkt = cached_xrp_and_global()
+    top200 = cached_top200()
+
+    # --- Stats panel ---
+    colA, colB, colC = st.columns(3)
+    with colA:
+        st.metric("Market Cap (USD)", f"${coin.get('market_cap', 0):,}")
+        st.metric("24h Volume (USD)", f"${coin.get('total_volume', 0):,}")
+        st.metric("Rank", f"{coin.get('market_cap_rank', '—')}")
+    with colB:
+        st.metric("Circulating Supply", f"{coin.get('circulating_supply', 0):,}")
+        st.metric("Total Supply", f"{coin.get('total_supply', 0) or 0:,}")
+        st.metric("Max Supply", f"{coin.get('max_supply', 0) or 0:,}")
+    with colC:
+        st.metric("All-Time High (USD)", f"${coin.get('ath', 0):,}")
+        st.metric("All-Time Low (USD)", f"${coin.get('atl', 0):,}")
+        # Dominance = XRP market cap / total market cap
+        try:
+            total_mcap = (global_mkt.get("total_market_cap") or {}).get("usd") or 0
+            dominance = (coin.get("market_cap", 0) / total_mcap * 100) if total_mcap else 0
+        except Exception:
+            dominance = 0
+        st.metric("Market Dominance", f"{dominance:.2f}%")
+
+    st.markdown(
+        "📄 **Whitepaper:** "
+        "[XRP Ledger Whitepaper](https://xrpl.org/whitepaper.html)"
+    )
+
+    st.divider()
+
+    # --- TradingView Chart ---
+    st.markdown("### 📈 TradingView Chart")
+
+    # Common spot pairs that work well
+    pair = st.selectbox(
+        "Exchange pair",
+        ["BINANCE:XRPUSDT", "BITSTAMP:XRPUSD", "COINBASE:XRPEUR", "KRAKEN:XRPUSD"],
+        index=0,
+    )
+
+    interval_label = st.selectbox(
+        "Interval",
+        ["5 min", "15 min", "30 min", "1 hour", "4 hours", "1 day"],
+        index=3
+    )
+    interval_map = {
+        "5 min": "5", "15 min": "15", "30 min": "30",
+        "1 hour": "60", "4 hours": "240", "1 day": "D"
+    }
+    interval = interval_map[interval_label]
+
+    # Indicator toggles
+    use_rsi  = st.checkbox("RSI",  value=True)
+    use_macd = st.checkbox("MACD", value=True)
+    use_ma   = st.checkbox("MA",   value=False)
+    use_ema  = st.checkbox("EMA",  value=False)
+
+    studies = []
+    if use_rsi:  studies.append("RSI@tv-basicstudies")
+    if use_macd: studies.append("MACD@tv-basicstudies")
+    if use_ma:   studies.append("Moving Average@tv-basicstudies")
+    if use_ema:  studies.append("Moving Average Exponential@tv-basicstudies")
+
+    height = st.slider("Chart height", min_value=400, max_value=900, value=600, step=20)
+
+    from streamlit.components.v1 import html
+    html(tradingview_widget_html(pair, interval, studies, height), height=height + 40)
+
+    st.divider()
+
+    # --- Converter ---
+    st.markdown("### 🔁 Converter (Top 200 → Fiat or Crypto)")
+
+    # Build crypto list for selection
+    id_to_price = {c["id"]: c.get("current_price", 0) for c in top200}
+    id_to_label = {c["id"]: f"{c['name']} ({c['symbol'].upper()})" for c in top200}
+
+    crypto_ids_sorted = sorted(id_to_label.keys(), key=lambda i: id_to_label[i].lower())
+    default_base = "ripple" if "ripple" in id_to_label else crypto_ids_sorted[0]
+
+    base_coin = st.selectbox(
+        "Base crypto (amount you have)",
+        [default_base] + [i for i in crypto_ids_sorted if i != "ripple"],
+        format_func=lambda i: id_to_label.get(i, i),
+        index=0
+    )
+    amount = st.number_input("Amount", min_value=0.0, value=100.0, step=1.0)
+
+    mode = st.radio("Convert to", ["Fiat", "Crypto"], horizontal=True)
+
+    if mode == "Fiat":
+        fiats = ["usd", "eur", "cny", "cop", "gbp", "jpy", "inr", "aud", "cad", "chf"]
+        fiat = st.selectbox("Fiat currency", fiats, index=0)
+
+        @st.cache_data(ttl=60)
+        def price_in_fiats(coin_id: str, vs_list: list[str]):
+            return cg_simple_price([coin_id], vs_list)
+
+        prices = price_in_fiats(base_coin, fiats)  # {coin_id: {fiat: price}}
+        p = ((prices.get(base_coin) or {}).get(fiat)) or 0
+        converted = amount * p
+        st.success(f"{amount:,.4f} {id_to_label.get(base_coin, base_coin)} ≈ {converted:,.2f} {fiat.upper()}")
+
+    else:  # Crypto → Crypto using USD ratio
+        quote_coin = st.selectbox(
+            "Quote crypto",
+            [i for i in crypto_ids_sorted if i != base_coin],
+            format_func=lambda i: id_to_label.get(i, i)
+        )
+        p_base = id_to_price.get(base_coin, 0)
+        p_quote = id_to_price.get(quote_coin, 0)
+        if p_base and p_quote:
+            converted = amount * (p_base / p_quote)
+            st.success(
+                f"{amount:,.4f} {id_to_label.get(base_coin, base_coin)} ≈ "
+                f"{converted:,.4f} {id_to_label.get(quote_coin, quote_coin)}"
+            )
+        else:
+            st.warning("Price data unavailable right now. Please try again.")
 
 # ---------------------------- Network ----------------------------
 with tab_network:

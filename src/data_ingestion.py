@@ -173,3 +173,52 @@ def get_server_health() -> dict:
         out["fee_error"] = str(e)
 
     return out
+
+# ---------------- CoinGecko helpers (market data) ----------------
+CG_BASE = "https://api.coingecko.com/api/v3"
+
+def cg_get_coin_market(coin_id: str = "ripple", vs: str = "usd") -> dict:
+    """
+    Returns one coin's market snapshot (market cap, volume, supply, ath/atl, rank, etc.)
+    """
+    url = f"{CG_BASE}/coins/markets"
+    params = {"vs_currency": vs, "ids": coin_id, "price_change_percentage": "24h"}
+    r = requests.get(url, params=params, timeout=20, headers=HEADERS)
+    r.raise_for_status()
+    data = r.json()
+    return data[0] if data else {}
+
+def cg_get_global() -> dict:
+    """
+    Returns global market data (total market cap) to compute dominance.
+    """
+    url = f"{CG_BASE}/global"
+    r = requests.get(url, timeout=20, headers=HEADERS)
+    r.raise_for_status()
+    return r.json().get("data", {}) or {}
+
+def cg_get_top_coins(limit: int = 200, vs: str = "usd") -> list[dict]:
+    """
+    Top N by market cap. Use for converter dropdowns and crypto-to-crypto ratios.
+    """
+    url = f"{CG_BASE}/coins/markets"
+    params = {
+        "vs_currency": vs,
+        "order": "market_cap_desc",
+        "per_page": int(limit),
+        "page": 1,
+        "price_change_percentage": "24h",
+    }
+    r = requests.get(url, params=params, timeout=30, headers=HEADERS)
+    r.raise_for_status()
+    return r.json() or []
+
+def cg_simple_price(coin_ids: list[str], vs_currencies: list[str]) -> dict:
+    """
+    For coin -> fiat conversions (e.g., XRP -> EUR). Returns {coin_id: {vs: price, ...}}
+    """
+    url = f"{CG_BASE}/simple/price"
+    params = {"ids": ",".join(coin_ids), "vs_currencies": ",".join(vs_currencies)}
+    r = requests.get(url, params=params, timeout=20, headers=HEADERS)
+    r.raise_for_status()
+    return r.json() or {}
