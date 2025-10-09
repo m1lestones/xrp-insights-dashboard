@@ -262,8 +262,10 @@ with tab_market:
 
     @st.cache_data(ttl=300)
     def cached_top200():
-        # For converter lists and USD prices
-        return cg_get_top_coins(limit=200, vs="usd")
+        try:
+            return cg_get_top_coins(limit=200, vs="usd") or []
+        except Exception:
+            return []
 
     coin, global_mkt = cached_xrp_and_global()
     top200 = cached_top200()
@@ -339,9 +341,12 @@ with tab_market:
     # --- Converter ---
     st.markdown("### 🔁 Converter (Top 200 → Fiat or Crypto)")
 
-    # Build crypto list for selection
-    id_to_price = {c["id"]: c.get("current_price", 0) for c in top200}
-    id_to_label = {c["id"]: f"{c['name']} ({c['symbol'].upper()})" for c in top200}
+    if not top200:
+        st.info("Top coins market data is temporarily unavailable (rate-limited). Try again shortly.")
+    else:
+        # Build crypto list for selection
+        id_to_price = {c["id"]: c.get("current_price", 0) for c in top200}
+        id_to_label = {c["id"]: f"{c['name']} ({c['symbol'].upper()})" for c in top200}
 
     crypto_ids_sorted = sorted(id_to_label.keys(), key=lambda i: id_to_label[i].lower())
     default_base = "ripple" if "ripple" in id_to_label else crypto_ids_sorted[0]

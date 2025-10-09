@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import time
 import pandas as pd
 import requests
 
@@ -199,19 +200,56 @@ def cg_get_global() -> dict:
 
 def cg_get_top_coins(limit: int = 200, vs: str = "usd") -> list[dict]:
     """
-    Top N by market cap. Use for converter dropdowns and crypto-to-crypto ratios.
+    Top coins by market cap from CoinGecko (/coins/markets).
+    Gracefully handles rate limits and temporary server errors.
+    Returns a (possibly empty) list instead of raising.
     """
-    url = f"{CG_BASE}/coins/markets"
-    params = {
-        "vs_currency": vs,
-        "order": "market_cap_desc",
-        "per_page": int(limit),
-        "page": 1,
-        "price_change_percentage": "24h",
-    }
-    r = requests.get(url, params=params, timeout=30, headers=HEADERS)
-    r.raise_for_status()
-    return r.json() or []
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    per_page = min(250, max(1, limit))
+    page = 1
+    out: list[dict] = []
+    attempts = 0
+
+    while len(out) < limit and attempts < 6:
+        try:
+            r = requests.get(
+                url,
+                params={
+                    "vs_currency": vs,
+                    "order": "market_cap_desc",
+                    "per_page": per_page,
+                    "page": page,
+                    "sparkline": "false",
+                    "price_change_percentage": "24h",
+                },
+                headers=HEADERS,
+                timeout=15,
+            )
+            # Handle common transient statuses with exponential backoff
+            if r.status_code in (429, 502, 503, 504):
+                time.sleep(0.5 * (2 ** attempts))  # 0.5,1,2,4,8,16s
+                attempts += 1
+                continue
+
+            r.raise_for_status()
+            data = r.json()
+            if not isinstance(data, list) or not data:
+                break
+
+            out.extend(data)
+            if len(data) < per_page:
+                break
+
+            page += 1
+            attempts = 0  # reset after success
+
+        except Exception:
+            time.sleep(0.5 * (2 ** attempts))
+            attempts += 1
+            if attempts >= 6:
+                break
+
+    return out[:limit]
 
 def cg_simple_price(coin_ids: list[str], vs_currencies: list[str]) -> dict:
     """
