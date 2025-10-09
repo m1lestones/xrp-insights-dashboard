@@ -152,3 +152,24 @@ def get_xrp_market(days: int = 7) -> pd.DataFrame:
         return prices
     except Exception:
         return pd.DataFrame(columns=["ts", "price_usd"])
+
+# --- Ledger / Server health helpers -----------------------------------------
+def get_server_health() -> dict:
+    """
+    Fetch XRPL server info and fee data.
+    Returns a dict. Missing pieces are noted with *_error so the UI can show gracefully.
+    """
+    out: dict = {}
+    try:
+        info = _rpc("server_info", {})
+        out["info"] = info.get("info", {}) or {}
+    except Exception as e:
+        out["info_error"] = str(e)
+
+    try:
+        fee = _rpc("fee", {})
+        out["fee"] = fee or {}
+    except Exception as e:
+        out["fee_error"] = str(e)
+
+    return out

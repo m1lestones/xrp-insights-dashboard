@@ -8,7 +8,8 @@ from src.data_ingestion import (
     fetch_recent_transactions,
     get_account_info, get_account_tx,
     get_last_endpoint,
-    get_xrp_quote, get_xrp_market,   # <-- add these
+    get_xrp_quote, get_xrp_market,
+    get_server_health,            # <-- add this
 )
 from src.processing import compute_txn_per_minute, compute_avg_fee
 from src.charts import line_tps, line_avg_fee
@@ -38,7 +39,7 @@ with st.sidebar:
         st.rerun()
 
 # -------- Tabs --------
-tab_overview, tab_explorer = st.tabs(["Overview", "Explorer"])
+tab_overview, tab_explorer, tab_network = st.tabs(["Overview", "Explorer", "Network"])
 
 # ---------------------------- Overview ----------------------------
 @st.cache_data(ttl=60)
@@ -248,6 +249,66 @@ with tab_explorer:
                 except Exception as e:
                     st.error("Lookup failed.")
                     st.caption(str(e))
+
+# ---------------------------- Network ----------------------------
+with tab_network:
+    st.subheader("🩺 Ledger Health")
+
+    @st.cache_data(ttl=30)
+    def cached_health():
+        return get_server_health()
+
+    h = cached_health()
+    info = h.get("info", {})
+    fee = h.get("fee", {})
+
+    # Parse common fields safely
+    server_state = info.get("server_state", "—")
+    peers = info.get("peers", "—")
+    load_factor = info.get("load_factor", "—")
+    validated = info.get("validated_ledger", {}) or {}
+    seq = validated.get("seq", "—")
+    complete_ledgers = info.get("complete_ledgers", "—")
+
+    drops = (fee.get("drops") or {}) if isinstance(fee, dict) else {}
+    base_fee_drops = drops.get("base_fee")
+    base_fee_xrp = None
+    try:
+        if base_fee_drops is not None:
+            base_fee_xrp = float(base_fee_drops) / 1_000_000
+    except Exception:
+        pass
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Server state", server_state)
+    with c2:
+        st.metric("Peers", str(peers))
+    with c3:
+        st.metric("Load factor", str(load_factor))
+    with c4:
+        st.metric("Validated ledger", str(seq))
+
+    c5, c6 = st.columns([2, 2])
+    with c5:
+        st.caption(f"Connected node: **{get_last_endpoint() or '—'}**")
+        st.write("Complete ledgers:")
+        st.code(str(complete_ledgers), language="text")
+    with c6:
+        if base_fee_xrp is not None:
+            st.metric("Base fee (XRP)", f"{base_fee_xrp:.6f}")
+        else:
+            st.info("Fee info unavailable.")
+
+    with st.expander("Raw server_info / fee JSON"):
+        if "info_error" in h:
+            st.error(f"server_info error: {h['info_error']}")
+        else:
+            st.json(info)
+        if "fee_error" in h:
+            st.error(f"fee error: {h['fee_error']}")
+        else:
+            st.json(fee)
 
 # ---------------------------- Safe auto-refresh ----------------------------
 if auto:
