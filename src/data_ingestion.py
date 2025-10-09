@@ -14,8 +14,16 @@ HEADERS = {
     "User-Agent": "XRP-Insights/0.2",
 }
 
+# Global tracker for which endpoint was last used
+LAST_ENDPOINT = None
+
+def get_last_endpoint() -> str | None:
+    return LAST_ENDPOINT
+
+
 def _rpc(method: str, params: dict) -> dict:
     """Call XRPL JSON-RPC with simple endpoint rotation."""
+    global LAST_ENDPOINT
     last_err = None
     for url in ENDPOINTS:
         try:
@@ -28,6 +36,7 @@ def _rpc(method: str, params: dict) -> dict:
             r.raise_for_status()
             res = r.json()
             if "result" in res:
+                LAST_ENDPOINT = url  # ✅ record which endpoint worked
                 return res["result"]
             # If shape is unexpected, try next endpoint
             last_err = RuntimeError(f"Bad RPC from {url}: {res}")
@@ -62,10 +71,16 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
                 except Exception:
                     pass
         if latest is None:
-            return pd.DataFrame(columns=["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"])
+            return pd.DataFrame(columns=[
+                "hash","date_utc","amount","fee_drops","account","transaction_type",
+                "amount_currency","issuer"
+            ])
     except Exception:
         # If server_info fails entirely, return empty
-        return pd.DataFrame(columns=["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"])
+        return pd.DataFrame(columns=[
+            "hash","date_utc","amount","fee_drops","account","transaction_type",
+            "amount_currency","issuer"
+        ])
 
     rows = []
     for idx in range(latest, latest - max(1, ledgers_back), -1):
@@ -80,7 +95,15 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
             if meta.get("TransactionResult") != "tesSUCCESS":
                 continue
             amt = tx.get("Amount")
-            amount_value = amt.get("value") if isinstance(amt, dict) else amt
+            if isinstance(amt, dict):
+                amount_value = amt.get("value")
+                amount_currency = amt.get("currency")
+                amount_issuer = amt.get("issuer")
+            else:
+                amount_value = amt
+                amount_currency = "XRP"
+                amount_issuer = None
+
             rows.append({
                 "hash": tx.get("hash"),
                 "date_utc": dt,
@@ -88,6 +111,8 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
                 "fee_drops": tx.get("Fee"),
                 "account": tx.get("Account"),
                 "transaction_type": tx.get("TransactionType"),
+                "amount_currency": amount_currency,  # ✅ needed for RLUSD lens
+                "issuer": amount_issuer,             # ✅ issuer for issued assets
             })
 
     df = pd.DataFrame(rows)
