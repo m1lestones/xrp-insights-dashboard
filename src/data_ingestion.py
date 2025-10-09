@@ -115,3 +115,40 @@ def get_account_tx(address: str, limit: int = 20) -> list[dict]:
         "ledger_index_max": -1
     })
     return res.get("transactions", []) or []
+
+# --- Markets: XRP price from CoinGecko ---
+
+def get_xrp_quote() -> dict | None:
+    """
+    Returns {'price': float, 'change_24h': float} or None on failure.
+    """
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids": "ripple", "vs_currencies": "usd", "include_24hr_change": "true"}
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json().get("ripple") or {}
+        return {
+            "price": float(data.get("usd")) if data.get("usd") is not None else None,
+            "change_24h": float(data.get("usd_24h_change")) if data.get("usd_24h_change") is not None else None,
+        }
+    except Exception:
+        return None
+
+def get_xrp_market(days: int = 7) -> pd.DataFrame:
+    """
+    Returns a DataFrame with columns ['ts','price_usd'] for the last N days.
+    """
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/ripple/market_chart"
+        params = {"vs_currency": "usd", "days": int(days)}
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        prices = pd.DataFrame(data.get("prices") or [], columns=["ts", "price_usd"])
+        if prices.empty:
+            return prices
+        prices["ts"] = pd.to_datetime(prices["ts"], unit="ms", utc=True)
+        return prices
+    except Exception:
+        return pd.DataFrame(columns=["ts", "price_usd"])

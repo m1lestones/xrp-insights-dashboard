@@ -8,6 +8,7 @@ from src.data_ingestion import (
     fetch_recent_transactions,
     get_account_info, get_account_tx,
     get_last_endpoint,
+    get_xrp_quote, get_xrp_market,   # <-- add these
 )
 from src.processing import compute_txn_per_minute, compute_avg_fee
 from src.charts import line_tps, line_avg_fee
@@ -69,6 +70,40 @@ with tab_overview:
             {"hash": "DEMO2", "date_utc": pd.Timestamp.utcnow(), "amount": "9000000",  "fee_drops": "10", "account": "rDEMO...", "transaction_type": "Payment"},
         ])
         st.info("Showing demo data (offline mode).")
+
+    # ----- Markets (XRP price) -----
+    with st.container():
+        st.subheader("📈 Market")
+        quote = get_xrp_quote()
+        c1, c2, c3 = st.columns([1, 2, 2])
+
+        with c1:
+            if quote and quote.get("price") is not None:
+                st.metric("XRP Price (USD)", f"${quote['price']:.4f}",
+                          delta=f"{quote['change_24h']:+.2f}%" if quote.get("change_24h") is not None else None)
+            else:
+                st.info("XRP price feed unavailable right now.")
+
+            # RLUSD note (placeholder)
+            st.caption("**RLUSD**: USD-pegged stablecoin on XRPL. Target ≈ **$1.00** (live market feed TBD).")
+
+        with c2:
+            m7 = get_xrp_market(days=7)
+            if not m7.empty:
+                st.caption("7-day price")
+                st.line_chart(m7.set_index("ts")["price_usd"])
+            else:
+                st.caption("7-day price")
+                st.info("No market data yet.")
+
+        with c3:
+            m30 = get_xrp_market(days=30)
+            if not m30.empty:
+                st.caption("30-day price")
+                st.line_chart(m30.set_index("ts")["price_usd"])
+            else:
+                st.caption("30-day price")
+                st.info("No market data yet.")
 
     if df is None or df.empty:
         st.error("No transactions available right now. Try **Refresh now** or enable **Demo data**.")
