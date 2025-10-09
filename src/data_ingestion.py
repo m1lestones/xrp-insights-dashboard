@@ -14,12 +14,10 @@ HEADERS = {
     "User-Agent": "XRP-Insights/0.2",
 }
 
-# Global tracker for which endpoint was last used
-LAST_ENDPOINT = None
+LAST_ENDPOINT = None  # track last successful node
 
 def get_last_endpoint() -> str | None:
     return LAST_ENDPOINT
-
 
 def _rpc(method: str, params: dict) -> dict:
     """Call XRPL JSON-RPC with simple endpoint rotation."""
@@ -36,9 +34,8 @@ def _rpc(method: str, params: dict) -> dict:
             r.raise_for_status()
             res = r.json()
             if "result" in res:
-                LAST_ENDPOINT = url  # ✅ record which endpoint worked
+                LAST_ENDPOINT = url
                 return res["result"]
-            # If shape is unexpected, try next endpoint
             last_err = RuntimeError(f"Bad RPC from {url}: {res}")
         except Exception as e:
             last_err = e
@@ -63,7 +60,6 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
         info = _rpc("server_info", {})
         latest = info.get("info", {}).get("validated_ledger", {}).get("seq")
         if latest is None:
-            # Fallback: try to parse complete_ledgers like "79100000-79100500"
             cl = info.get("info", {}).get("complete_ledgers")
             if isinstance(cl, str) and "-" in cl:
                 try:
@@ -71,16 +67,9 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
                 except Exception:
                     pass
         if latest is None:
-            return pd.DataFrame(columns=[
-                "hash","date_utc","amount","fee_drops","account","transaction_type",
-                "amount_currency","issuer"
-            ])
+            return pd.DataFrame(columns=["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"])
     except Exception:
-        # If server_info fails entirely, return empty
-        return pd.DataFrame(columns=[
-            "hash","date_utc","amount","fee_drops","account","transaction_type",
-            "amount_currency","issuer"
-        ])
+        return pd.DataFrame(columns=["hash", "date_utc", "amount", "fee_drops", "account", "transaction_type"])
 
     rows = []
     for idx in range(latest, latest - max(1, ledgers_back), -1):
@@ -95,15 +84,7 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
             if meta.get("TransactionResult") != "tesSUCCESS":
                 continue
             amt = tx.get("Amount")
-            if isinstance(amt, dict):
-                amount_value = amt.get("value")
-                amount_currency = amt.get("currency")
-                amount_issuer = amt.get("issuer")
-            else:
-                amount_value = amt
-                amount_currency = "XRP"
-                amount_issuer = None
-
+            amount_value = amt.get("value") if isinstance(amt, dict) else amt
             rows.append({
                 "hash": tx.get("hash"),
                 "date_utc": dt,
@@ -111,8 +92,6 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
                 "fee_drops": tx.get("Fee"),
                 "account": tx.get("Account"),
                 "transaction_type": tx.get("TransactionType"),
-                "amount_currency": amount_currency,  # ✅ needed for RLUSD lens
-                "issuer": amount_issuer,             # ✅ issuer for issued assets
             })
 
     df = pd.DataFrame(rows)
@@ -122,7 +101,6 @@ def fetch_recent_transactions(ledgers_back: int = 20) -> pd.DataFrame:
 
 # ---- Address Explorer helpers ----
 def get_account_info(address: str) -> dict:
-    """Return account_info.result (contains 'account_data' on success)."""
     return _rpc("account_info", {
         "account": address,
         "ledger_index": "validated",
@@ -130,7 +108,6 @@ def get_account_info(address: str) -> dict:
     })
 
 def get_account_tx(address: str, limit: int = 20) -> list[dict]:
-    """Return list from account_tx.result.transactions (may be empty)."""
     res = _rpc("account_tx", {
         "account": address,
         "limit": int(limit),

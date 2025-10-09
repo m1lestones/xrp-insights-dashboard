@@ -7,6 +7,7 @@ from src.config import REFRESH_SECONDS, TX_TABLE_ROWS
 from src.data_ingestion import (
     fetch_recent_transactions,
     get_account_info, get_account_tx,
+    get_last_endpoint,
 )
 from src.processing import compute_txn_per_minute, compute_avg_fee
 from src.charts import line_tps, line_avg_fee
@@ -57,6 +58,9 @@ with tab_overview:
                 df = cached_recent(20)
         except Exception as e:
             st.warning(f"XRPL fetch failed: {e}")
+
+    # Show which node we're connected to
+    st.caption(f"Connected node: {get_last_endpoint() or '—'}")
 
     # Demo dataset if needed
     if (df is None or df.empty) and use_demo:
